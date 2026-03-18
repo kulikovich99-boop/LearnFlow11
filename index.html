@@ -640,22 +640,63 @@ function confirmStart(){
   startTimer(id,secs);
 }
 
-// ── TIMER ──
-// Замість лічильника секунд — зберігаємо реальний час старту.
-// Коли Safari заморожує вкладку і повертає — рахуємо різницю Date.now().
+// ── TIMER STATE PERSISTENCE ──
+function saveTimerState(){
+  if(!activeId){
+    localStorage.removeItem('lf3_timer');
+    return;
+  }
+  localStorage.setItem('lf3_timer', JSON.stringify({
+    activeId, totalSecs, sessionStart, isPaused,
+    remaining: isPaused ? remaining : null // якщо на паузі — зберігаємо remaining
+  }));
+}
 
+function restoreTimerState(){
+  const raw=localStorage.getItem('lf3_timer');
+  if(!raw) return;
+  const t=JSON.parse(raw);
+  if(!t||!t.activeId) return;
+  // Перевіряємо що проект ще існує
+  if(!D.subjects.find(s=>s.id===t.activeId)) return;
+
+  activeId=t.activeId;
+  totalSecs=t.totalSecs;
+  sessionStart=t.sessionStart;
+  isPaused=t.isPaused;
+
+  if(isPaused){
+    remaining=t.remaining;
+  } else {
+    const elapsed=Math.round((Date.now()-sessionStart)/1000);
+    remaining=Math.max(0, totalSecs-elapsed);
+  }
+
+  if(remaining<=0){
+    // Час вийшов поки сторінка була закрита — зберігаємо сесію
+    saveSession();
+    activeId=null; sessionStart=null;
+    localStorage.removeItem('lf3_timer');
+    toast('⏰ Сесія завершилась поки ти був відсутній!');
+    return;
+  }
+
+  timerIv=setInterval(tick, 500);
+}
+
+// ── TIMER ──
 function startTimer(id,secs){
   stopTimer(false);
   activeId=id; isPaused=false;
   sessionStart=Date.now();
   remaining=secs; totalSecs=secs;
-  timerIv=setInterval(tick,500); // 500ms для точнішого відображення
+  saveTimerState();
+  timerIv=setInterval(tick,500);
   renderAll();
 }
 
 function tick(){
   if(!activeId||isPaused) return;
-  // Рахуємо від реального часу, а не від лічильника
   const elapsed=Math.round((Date.now()-sessionStart)/1000);
   remaining=Math.max(0, totalSecs-elapsed);
   if(remaining<=0){ finishTimer(); playBeep(); toast('⏰ Сесія завершена!'); return; }
@@ -673,13 +714,12 @@ function updateBanner(){
 function pauseResume(){
   if(!activeId) return;
   if(isPaused){
-    // Відновлюємо — зсуваємо sessionStart вперед на час паузи
     sessionStart=Date.now()-(totalSecs-remaining)*1000;
     isPaused=false;
   } else {
-    // Ставимо на паузу — запам'ятовуємо поточний remaining
     isPaused=true;
   }
+  saveTimerState();
   updateBanner();
 }
 
@@ -688,20 +728,25 @@ function stopTimer(doSave=true){
   clearInterval(timerIv); timerIv=null;
   if(doSave&&sessionStart) saveSession();
   activeId=null; isPaused=false; sessionStart=null;
+  saveTimerState();
   renderAll();
 }
 
 function finishTimer(){
   clearInterval(timerIv); timerIv=null;
   if(sessionStart) saveSession();
-  activeId=null; sessionStart=null; renderAll();
+  activeId=null; sessionStart=null;
+  saveTimerState();
+  renderAll();
 }
 
 function doneSession(){
   clearInterval(timerIv); timerIv=null;
   if(sessionStart) saveSession();
   toast('✓ Сесію збережено!');
-  activeId=null; sessionStart=null; renderAll();
+  activeId=null; sessionStart=null;
+  saveTimerState();
+  renderAll();
 }
 
 function saveSession(){
@@ -711,10 +756,9 @@ function saveSession(){
   save();
 }
 
-// Коли повертаємось із фону — одразу синхронізуємо таймер
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible' && activeId && !isPaused){
-    tick(); // миттєво оновлює remaining від реального часу
+    tick();
     updateBanner();
   }
 });
@@ -879,6 +923,7 @@ function renderChart(){
 
 document.getElementById('iName').addEventListener('keydown',e=>{if(e.key==='Enter')addProject();});
 window.addEventListener('resize',()=>{if(curPage===2)renderChart();});
+restoreTimerState();
 renderAll();
 </script>
 </body>
