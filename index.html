@@ -641,19 +641,27 @@ function confirmStart(){
 }
 
 // ── TIMER ──
+// Замість лічильника секунд — зберігаємо реальний час старту.
+// Коли Safari заморожує вкладку і повертає — рахуємо різницю Date.now().
+
 function startTimer(id,secs){
   stopTimer(false);
-  activeId=id;isPaused=false;sessionStart=Date.now();
-  remaining=secs;totalSecs=secs;
-  timerIv=setInterval(tick,1000);
+  activeId=id; isPaused=false;
+  sessionStart=Date.now();
+  remaining=secs; totalSecs=secs;
+  timerIv=setInterval(tick,500); // 500ms для точнішого відображення
   renderAll();
 }
+
 function tick(){
-  if(isPaused)return;
-  remaining--;
-  if(remaining<=0){finishTimer();playBeep();toast('⏰ Сесія завершена!');return;}
+  if(!activeId||isPaused) return;
+  // Рахуємо від реального часу, а не від лічильника
+  const elapsed=Math.round((Date.now()-sessionStart)/1000);
+  remaining=Math.max(0, totalSecs-elapsed);
+  if(remaining<=0){ finishTimer(); playBeep(); toast('⏰ Сесія завершена!'); return; }
   updateBanner();
 }
+
 function updateBanner(){
   const warn=remaining<120;
   document.getElementById('tbClock').textContent=fmtSecs(remaining);
@@ -661,31 +669,55 @@ function updateBanner(){
   document.getElementById('tbFill').style.width=Math.max(0,(remaining/totalSecs)*100)+'%';
   document.getElementById('tbPauseBtn').textContent=isPaused?'▶ Далі':'⏸ Пауза';
 }
-function pauseResume(){isPaused=!isPaused;updateBanner();}
+
+function pauseResume(){
+  if(!activeId) return;
+  if(isPaused){
+    // Відновлюємо — зсуваємо sessionStart вперед на час паузи
+    sessionStart=Date.now()-(totalSecs-remaining)*1000;
+    isPaused=false;
+  } else {
+    // Ставимо на паузу — запам'ятовуємо поточний remaining
+    isPaused=true;
+  }
+  updateBanner();
+}
+
 function stopTimer(doSave=true){
-  if(!activeId)return;
-  clearInterval(timerIv);timerIv=null;
-  if(doSave&&sessionStart)saveSession();
-  activeId=null;isPaused=false;sessionStart=null;
+  if(!activeId) return;
+  clearInterval(timerIv); timerIv=null;
+  if(doSave&&sessionStart) saveSession();
+  activeId=null; isPaused=false; sessionStart=null;
   renderAll();
 }
+
 function finishTimer(){
-  clearInterval(timerIv);timerIv=null;
-  if(sessionStart)saveSession();
-  activeId=null;sessionStart=null;renderAll();
+  clearInterval(timerIv); timerIv=null;
+  if(sessionStart) saveSession();
+  activeId=null; sessionStart=null; renderAll();
 }
+
 function doneSession(){
-  clearInterval(timerIv);timerIv=null;
-  if(sessionStart)saveSession();
+  clearInterval(timerIv); timerIv=null;
+  if(sessionStart) saveSession();
   toast('✓ Сесію збережено!');
-  activeId=null;sessionStart=null;renderAll();
+  activeId=null; sessionStart=null; renderAll();
 }
+
 function saveSession(){
   const dur=Math.round((Date.now()-sessionStart)/1000);
-  if(dur<5)return;
-  D.sessions.push({sid:activeId,day:dayKey(),wk:weekKey(),dur});
+  if(dur<5) return;
+  D.sessions.push({sid:activeId, day:dayKey(), wk:weekKey(), dur});
   save();
 }
+
+// Коли повертаємось із фону — одразу синхронізуємо таймер
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible' && activeId && !isPaused){
+    tick(); // миттєво оновлює remaining від реального часу
+    updateBanner();
+  }
+});
 function playBeep(){
   try{const ctx=new(window.AudioContext||window.webkitAudioContext)();[0,.35,.7].forEach(d=>{const o=ctx.createOscillator(),g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=660;g.gain.setValueAtTime(.3,ctx.currentTime+d);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+d+.5);o.start(ctx.currentTime+d);o.stop(ctx.currentTime+d+.5);});}catch(e){}
 }
